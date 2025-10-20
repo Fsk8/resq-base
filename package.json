@@ -1,0 +1,22 @@
+{
+  "name": "resq-base",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run -ws build",
+    "dev:web": "npm run -w web dev",
+    "compile": "npm run -w contracts compile",
+    "deploy:baseSepolia": "npm run -w contracts deploy:baseSepolia",
+    "test": "npm run -w contracts test"
+  },
+  "description": "",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
