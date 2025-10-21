@@ -7,7 +7,7 @@ module.exports = {
   networks: {
     baseSepolia: {
       url: process.env.BASE_SEPOLIA_RPC || "",
-      //accounts: process.env.DEPLOYER_PK ? [process.env.DEPLOYER_PK] : [],
+      accounts: process.env.DEPLOYER_PK ? [process.env.DEPLOYER_PK] : [],
     },
   },
 };

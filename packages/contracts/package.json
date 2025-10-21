@@ -3,8 +3,11 @@
   "private": true,
   "scripts": {
     "compile": "hardhat compile",
-    "deploy:baseSepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
-    "test": "hardhat test"
+    "test": "hardhat test",
+    "deploy:factory": "hardhat run scripts/deployFactory.cjs --network baseSepolia",
+    "deploy:mock": "hardhat run scripts/deployMockToken.cjs --network baseSepolia",
+    "circle:create": "node scripts/createCircle.cjs",
+    "circle:demo": "node scripts/demoFlow.cjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.0",
