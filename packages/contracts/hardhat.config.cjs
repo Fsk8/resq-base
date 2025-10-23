@@ -1,7 +1,8 @@
+// hardhat.config.cjs
+require("@nomiclabs/hardhat-ethers"); // plugin ethers v5 para HH2
 require("dotenv").config();
-require("@nomicfoundation/hardhat-toolbox");
 
-/** @type {import('hardhat/config').HardhatUserConfig} */
+/** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: "0.8.24",
   networks: {
