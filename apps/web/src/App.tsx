@@ -14,16 +14,25 @@ import {
   prepareContractCall,
   toUnits,
 } from "thirdweb";
-import { baseSepolia } from "thirdweb/chains";
 import { createWallet, inAppWallet } from "thirdweb/wallets";
-import type { Abi } from "viem";
-import { formatUnits } from "viem";
+
+// ⬇️ Cadenas aliasadas para NO mezclar tipos
+import { baseSepolia as baseSepoliaTW } from "thirdweb/chains"; // (thirdweb)
+import { baseSepolia as baseSepoliaViem } from "viem/chains"; // (viem)
+
+// ✅ viem para lecturas (view calls)
+import { createPublicClient, http, formatUnits, type Abi } from "viem";
+
 import { RESQ_FACTORY_ABI, RESQ_CIRCLE_ABI, ERC20_ABI } from "./abi/resq";
 import { MyCircles } from "./components/MyCircles";
+import { Discover } from "./pages/Discover";
 
 /** ENV */
 const FACTORY = import.meta.env.VITE_FACTORY_ADDR as `0x${string}`;
 const CLIENT_ID = import.meta.env.VITE_THIRDWEB_CLIENT_ID as string | undefined;
+// RPC (opcional): usa público si no defines uno
+const BASE_SEPOLIA_RPC =
+  import.meta.env.VITE_BASE_SEPOLIA_RPC || "https://sepolia.base.org";
 
 /** Helper TX */
 function pc(contract: any, method: string, params: any[] = []) {
@@ -66,6 +75,16 @@ export default function App() {
       </div>
     );
   }
+  if (!FACTORY) {
+    return (
+      <div style={{ padding: 20, fontFamily: "system-ui" }}>
+        <h1>ResQ (Base)</h1>
+        <p style={{ color: "#b71c1c" }}>
+          Falta <code>VITE_FACTORY_ADDR</code> en <code>apps/web/.env</code>.
+        </p>
+      </div>
+    );
+  }
 
   const client = createThirdwebClient({ clientId: CLIENT_ID });
 
@@ -94,17 +113,20 @@ export default function App() {
     window.location.reload();
   }
 
-  // Instancia del Factory (una sola vez)
+  // Instancia del Factory (thirdweb) — usa baseSepoliaTW
   const factory = useMemo(
     () =>
       getContract({
         client,
-        chain: baseSepolia,
+        chain: baseSepoliaTW,
         address: FACTORY,
         abi: RESQ_FACTORY_ABI as Abi,
       }),
     []
   );
+
+  // Tabs
+  const [tab, setTab] = useState<"discover" | "dashboard">("discover");
 
   // Estado compartido para autocompletar acciones
   const [selectedCircle, setSelectedCircle] = useState<`0x${string}` | "">("");
@@ -114,43 +136,65 @@ export default function App() {
   function handleSelectCircle(circle: `0x${string}`, token?: `0x${string}`) {
     setSelectedCircle(circle);
     if (token) setSelectedToken(token);
-    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    setTab("dashboard");
+    setTimeout(
+      () =>
+        window.scrollTo({
+          top: document.body.scrollHeight,
+          behavior: "smooth",
+        }),
+      50
+    );
   }
 
   return (
     <div
       style={{
         padding: 20,
-        maxWidth: 900,
+        maxWidth: 1000,
         margin: "0 auto",
         fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
       }}
     >
       <header
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
+          display: "grid",
+          gridTemplateColumns: "1fr auto auto",
           gap: 12,
-          flexWrap: "wrap",
+          alignItems: "center",
         }}
       >
         <h1 style={{ margin: 0 }}>ResQ (Base · AA con gas patrocinado)</h1>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={() => setTab("discover")}
+            disabled={tab === "discover"}
+          >
+            Discover
+          </button>
+          <button
+            onClick={() => setTab("dashboard")}
+            disabled={tab === "dashboard"}
+          >
+            Dashboard
+          </button>
+        </div>
 
         <div
           style={{
             display: "flex",
             gap: 8,
             alignItems: "center",
-            flexWrap: "wrap",
+            justifySelf: "end",
           }}
         >
           <ConnectButton
             client={client}
-            chain={baseSepolia}
+            chain={baseSepoliaTW}
             accountAbstraction={{
-              chain: baseSepolia,
-              sponsorGas: true, // Paymaster de thirdweb en testnet
+              chain: baseSepoliaTW,
+              sponsorGas: true,
             }}
             wallets={walletsBoth}
             connectModal={{ title: "Conectar a ResQ", size: "compact" }}
@@ -162,30 +206,41 @@ export default function App() {
       </header>
 
       <p style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-        Conectado: {active?.address ?? "—"} (con AA, suele ser tu Smart Account)
+        Smart Account: {active?.address ?? "—"} · Factory: {FACTORY}
       </p>
 
       <hr />
 
-      <CreateCircle
-        client={client}
-        factory={factory}
-        onCreated={() => setRefreshKey((k) => k + 1)}
-      />
+      {tab === "discover" ? (
+        <Discover
+          client={client}
+          factoryAddress={FACTORY}
+          factoryAbi={RESQ_FACTORY_ABI as Abi}
+          onPick={handleSelectCircle}
+        />
+      ) : (
+        <>
+          <CreateCircle
+            client={client}
+            factory={factory}
+            onCreated={() => setRefreshKey((k) => k + 1)}
+          />
 
-      <MyCircles
-        factory={factory}
-        onSelectCircle={handleSelectCircle}
-        refreshKey={refreshKey}
-      />
+          <MyCircles
+            factory={factory}
+            onSelectCircle={handleSelectCircle}
+            refreshKey={refreshKey}
+          />
 
-      <hr />
+          <hr />
 
-      <CircleActions
-        client={client}
-        initialCircle={selectedCircle}
-        initialToken={selectedToken}
-      />
+          <CircleActions
+            client={client}
+            initialCircle={selectedCircle}
+            initialToken={selectedToken}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -303,7 +358,16 @@ function CreateCircle({
   );
 }
 
-/* =================== Acciones del círculo =================== */
+/* =================== Acciones del círculo (con Preflight visual) =================== */
+type PreflightData = {
+  token: `0x${string}`;
+  decimals: number;
+  balance: number;
+  allowance: number;
+  minContribution: number;
+  want: number;
+};
+
 function CircleActions({
   client,
   initialCircle,
@@ -314,6 +378,7 @@ function CircleActions({
   initialToken?: `0x${string}` | "";
 }) {
   const { mutateAsync: sendTx, isPending, error } = useSendTransaction();
+  const active = useActiveAccount();
 
   const [circleAddr, setCircleAddr] = useState(initialCircle || "");
   const [tokenAddr, setTokenAddr] = useState(initialToken || "");
@@ -324,6 +389,11 @@ function CircleActions({
   const [evidence, setEvidence] = useState("ipfs://demoCID");
   const [claimId, setClaimId] = useState(0);
 
+  // Preflight UI state
+  const [pf, setPf] = useState<PreflightData | null>(null);
+  const [pfLoading, setPfLoading] = useState(false);
+  const [pfError, setPfError] = useState<string | null>(null);
+
   useEffect(() => {
     if (initialCircle) setCircleAddr(initialCircle);
   }, [initialCircle]);
@@ -331,12 +401,13 @@ function CircleActions({
     if (initialToken) setTokenAddr(initialToken);
   }, [initialToken]);
 
+  // Contratos thirdweb (para mandar TX) — usa baseSepoliaTW
   const circle = useMemo(
     () =>
       circleAddr
         ? getContract({
             client,
-            chain: baseSepolia,
+            chain: baseSepoliaTW,
             address: circleAddr as `0x${string}`,
             abi: RESQ_CIRCLE_ABI as Abi,
           })
@@ -349,37 +420,13 @@ function CircleActions({
       tokenAddr
         ? getContract({
             client,
-            chain: baseSepolia,
+            chain: baseSepoliaTW,
             address: tokenAddr as `0x${string}`,
             abi: ERC20_ABI as Abi,
           })
         : undefined,
     [tokenAddr]
   );
-
-  // 👇 añade esto dentro de CircleActions()
-  const active = useActiveAccount();
-
-  /** Mint de prueba al usuario conectado (Smart Account) */
-  async function devMint() {
-    if (!erc20 || !active?.address) {
-      alert("Completa el token ERC20 y conéctate primero.");
-      return;
-    }
-    try {
-      const amount = toUnits("1000", decimals); // 1000 tokens de prueba
-      // Si tu MockERC20 tiene signature mint(address,uint256):
-      const tx = pc(erc20, "mint", [active.address, amount]);
-      const { transactionHash } = await sendTx(tx);
-      alert(`✅ Mint ok (1000 tokens)\nTX: ${transactionHash}`);
-    } catch (e: any) {
-      console.error("mint error:", e);
-      alert(
-        "❌ No se pudo mintear.\n" +
-          "Revisa que tu MockERC20 tenga el método mint(address,uint256) y que cualquiera pueda llamarlo."
-      );
-    }
-  }
 
   useEffect(() => {
     if (error) {
@@ -388,11 +435,202 @@ function CircleActions({
     }
   }, [error]);
 
+  // Helpers (thirdweb para TX; viem para lecturas)
+  async function getTokenFromCircle(): Promise<`0x${string}` | undefined> {
+    if (!circle) return undefined;
+    try {
+      const t = await (circle as any).read.token([]);
+      return t as `0x${string}`;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // ✅ cliente viem para lecturas — usa baseSepoliaViem
+  const publicClient = useMemo(
+    () =>
+      createPublicClient({
+        chain: baseSepoliaViem,
+        transport: http(BASE_SEPOLIA_RPC),
+      }),
+    []
+  );
+
+  // ======= Preflight visual con viem =======
+  async function preflightRead() {
+    try {
+      setPfLoading(true);
+      setPfError(null);
+
+      if (!active?.address) throw new Error("Conéctate primero.");
+      if (!circleAddr) throw new Error("Completa la dirección del Círculo.");
+
+      // 1) Determinar token del círculo si falta
+      let t = tokenAddr as `0x${string}` | "";
+      if (!t) {
+        const fromCircle = await getTokenFromCircle();
+        if (fromCircle) {
+          t = fromCircle;
+          setTokenAddr(fromCircle);
+        }
+      }
+      if (!t) throw new Error("No se pudo determinar el token del círculo.");
+
+      // 2) Leer decimals (con viem) si el input no es fiable
+      let d = Number.isFinite(decimals) ? decimals : NaN;
+      if (!Number.isFinite(d)) {
+        d = (await publicClient.readContract({
+          address: t as `0x${string}`,
+          abi: ERC20_ABI as Abi,
+          functionName: "decimals",
+          args: [],
+        })) as number;
+      }
+
+      // 3) Lecturas paralelas (con viem)
+      const [balRaw, allowanceRaw, minCRaw] = await Promise.all([
+        publicClient.readContract({
+          address: t as `0x${string}`,
+          abi: ERC20_ABI as Abi,
+          functionName: "balanceOf",
+          args: [active.address as `0x${string}`],
+        }),
+        publicClient.readContract({
+          address: t as `0x${string}`,
+          abi: ERC20_ABI as Abi,
+          functionName: "allowance",
+          args: [active.address as `0x${string}`, circleAddr as `0x${string}`],
+        }),
+        publicClient.readContract({
+          address: circleAddr as `0x${string}`,
+          abi: RESQ_CIRCLE_ABI as Abi,
+          functionName: "minContribution",
+          args: [],
+        }),
+      ]);
+
+      // 4) Normalizar & guardar
+      const balance = Number(formatUnits(balRaw as bigint, d));
+      const allowance = Number(formatUnits(allowanceRaw as bigint, d));
+      const minContribution = Number(formatUnits(minCRaw as bigint, d));
+      const want = Number(amountHuman || "0");
+
+      setPf({
+        token: t as `0x${string}`,
+        decimals: d,
+        balance,
+        allowance,
+        minContribution,
+        want,
+      });
+    } catch (e: any) {
+      setPf(null);
+      setPfError(e?.message || String(e));
+    } finally {
+      setPfLoading(false);
+    }
+  }
+
+  // Hace approve exactamente por la diferencia que falta para llegar a "want"
+  async function fixApprove() {
+    if (!pf) return;
+    try {
+      const need = Math.max(0, pf.want - pf.allowance);
+      if (need <= 0) return;
+
+      // Reinstancia contrato por si el token cambió en preflight
+      const tokenCtr = getContract({
+        client,
+        chain: baseSepoliaTW,
+        address: pf.token,
+        abi: ERC20_ABI as any,
+      });
+
+      const raw = toUnits(String(need), pf.decimals);
+      const tx = pc(tokenCtr, "approve", [circleAddr as `0x${string}`, raw]);
+      await sendTx(tx);
+
+      // Refresca preflight
+      await preflightRead();
+    } catch (e) {
+      console.error("fixApprove error:", e);
+      alert(`Error al aprobar: ${String(e)}`);
+    }
+  }
+
+  /** Dev Mint directo al token indicado en el input Token */
+  async function devMint() {
+    if (!tokenAddr || !active?.address)
+      return alert("Conéctate y completa token.");
+    const tokenCtr = getContract({
+      client,
+      chain: baseSepoliaTW,
+      address: tokenAddr as `0x${string}`,
+      abi: ERC20_ABI as any,
+    });
+    const amount = toUnits("1000", decimals);
+    try {
+      const tx = pc(tokenCtr, "mint", [active.address, amount]);
+      await sendTx(tx);
+      await preflightRead(); // refresca panel
+    } catch {
+      alert("No se pudo mintear. ¿Mint público disponible?");
+    }
+  }
+
+  /** Faucet: detecta el token del círculo y mintea 100 al Smart Account conectado */
+  async function faucetFromCircleToken() {
+    const who = active?.address;
+    if (!who) return alert("Conéctate primero.");
+    try {
+      // Si no hay tokenAddr, intenta leer del círculo
+      let t = tokenAddr as `0x${string}` | "";
+      if (!t) {
+        const fromCircle = await getTokenFromCircle();
+        if (fromCircle) {
+          t = fromCircle;
+          setTokenAddr(fromCircle);
+        }
+      }
+      if (!t) return alert("No se pudo determinar el token del círculo.");
+
+      // Leer decimals con viem (fiable)
+      const d = (await publicClient.readContract({
+        address: t as `0x${string}`,
+        abi: ERC20_ABI as Abi,
+        functionName: "decimals",
+        args: [],
+      })) as number;
+
+      const tokenCtr = getContract({
+        client,
+        chain: baseSepoliaTW,
+        address: t as `0x${string}`,
+        abi: ERC20_ABI as any,
+      });
+
+      const amount = toUnits("100", d); // 100 tokens
+      const tx = pc(tokenCtr, "mint", [who, amount]); // requiere mint(address,uint256) público
+      await sendTx(tx);
+      await preflightRead(); // refresca panel
+    } catch (e) {
+      console.error("faucetFromCircleToken error:", e);
+      alert("❌ Faucet falló. ¿El token tiene mint(address,uint256) público?");
+    }
+  }
+
   async function approveAndJoin() {
-    if (!erc20 || !circle) return alert("Completa token y círculo");
+    if (!tokenAddr || !circle) return alert("Completa token y círculo");
+    const tokenCtr = getContract({
+      client,
+      chain: baseSepoliaTW,
+      address: tokenAddr as `0x${string}`,
+      abi: ERC20_ABI as any,
+    });
     const raw = toUnits(amountHuman, decimals);
-    await sendTx(pc(erc20, "approve", [circleAddr as `0x${string}`, raw]));
+    await sendTx(pc(tokenCtr, "approve", [circleAddr as `0x${string}`, raw]));
     await sendTx(pc(circle, "joinAndContribute", [raw]));
+    await preflightRead();
     alert("✅ Aprobado + unido");
   }
 
@@ -445,27 +683,42 @@ function CircleActions({
           value={decimals}
           onChange={(e) => setDecimals(Number(e.target.value))}
         />
+        <label>Monto a aportar:</label>
+        <input
+          value={amountHuman}
+          onChange={(e) => setAmountHuman(e.target.value)}
+          placeholder="ej. 2"
+        />
       </div>
 
-      <div style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={preflightRead} disabled={pfLoading}>
+          {pfLoading ? "Leyendo..." : "Preflight"}
+        </button>
         <button disabled={isPending} onClick={approveAndJoin}>
           {isPending ? "Procesando..." : "Approve + Join"}
         </button>
-        <button onClick={devMint} style={{ marginLeft: 8 }}>
-          Dev Mint 1000
+        <button onClick={devMint}>Dev Mint 1000</button>
+        <button onClick={faucetFromCircleToken}>
+          Faucet (token del círculo)
         </button>
       </div>
+
+      {/* Panel visual de Preflight */}
+      <PreflightPanel data={pf} error={pfError} onFixApprove={fixApprove} />
 
       <div style={{ marginTop: 12 }}>
         <input
           value={evidence}
           onChange={(e) => setEvidence(e.target.value)}
           placeholder="ipfs://CID"
+          style={{ width: 300, marginRight: 8 }}
         />
         <input
           value={claimHuman}
           onChange={(e) => setClaimHuman(e.target.value)}
           placeholder="Monto a reclamar"
+          style={{ width: 180, marginRight: 8 }}
         />
         <button onClick={openClaim}>Abrir Claim</button>
       </div>
@@ -475,15 +728,109 @@ function CircleActions({
           type="number"
           value={claimId}
           onChange={(e) => setClaimId(Number(e.target.value))}
+          style={{ width: 120, marginRight: 8 }}
         />
         <button onClick={voteYes}>Votar SÍ</button>
-        <button onClick={finalize}>Finalizar</button>
+        <button onClick={finalize} style={{ marginLeft: 8 }}>
+          Finalizar
+        </button>
       </div>
 
       {circle && (
         <CircleReads circle={circle} claimId={claimId} decimals={decimals} />
       )}
     </section>
+  );
+}
+
+/* =================== Panel Visual de Preflight =================== */
+function PreflightPanel({
+  data,
+  error,
+  onFixApprove,
+}: {
+  data: {
+    token: `0x${string}`;
+    decimals: number;
+    balance: number;
+    allowance: number;
+    minContribution: number;
+    want: number;
+  } | null;
+  error: string | null;
+  onFixApprove: () => void;
+}) {
+  if (error) {
+    return (
+      <div
+        style={{
+          marginTop: 12,
+          background: "#fff5f5",
+          border: "1px solid #ffdddd",
+          padding: 12,
+          borderRadius: 8,
+          color: "#a30000",
+        }}
+      >
+        <b>Preflight error:</b> {error}
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const okBalance = data.balance >= data.want;
+  const okMin = data.want >= data.minContribution;
+  const okAllowance = data.allowance >= data.want;
+  const needApprove = Math.max(0, data.want - data.allowance);
+
+  const Row = ({
+    label,
+    value,
+    ok,
+  }: {
+    label: string;
+    value: string | number;
+    ok: boolean;
+  }) => (
+    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      <span style={{ width: 180, opacity: 0.7 }}>{label}</span>
+      <span
+        style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+      >
+        {value}
+      </span>
+      <span>{ok ? "✅" : "❌"}</span>
+    </div>
+  );
+
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        border: "1px solid #eee",
+        borderRadius: 8,
+        padding: 12,
+        background: "#fafafa",
+      }}
+    >
+      <div style={{ marginBottom: 6, fontWeight: 600 }}>Preflight</div>
+
+      <Row label="Token" value={data.token} ok={true} />
+      <Row label="Decimals" value={data.decimals} ok={true} />
+      <Row label="Balance" value={data.balance} ok={okBalance} />
+      <Row label="Allowance → circle" value={data.allowance} ok={okAllowance} />
+      <Row label="minContribution" value={data.minContribution} ok={okMin} />
+      <Row label="Quiero aportar" value={data.want} ok={okMin && okBalance} />
+
+      {!okAllowance && (
+        <div style={{ marginTop: 10 }}>
+          <button onClick={onFixApprove}>
+            Arreglar approve (falta {needApprove})
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

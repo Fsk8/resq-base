@@ -4,14 +4,10 @@ import { ThirdwebProvider } from "thirdweb/react";
 
 const queryClient = new QueryClient();
 
-/**
- * Orden importante:
- * - QueryClientProvider debe envolver a cualquier componente/hook de thirdweb/react,
- *   porque thirdweb usa internamente TanStack Query.
- */
 export function AppProviders({ children }: PropsWithChildren) {
   return (
     <QueryClientProvider client={queryClient}>
+      {/* sin activeChain y sin clientId */}
       <ThirdwebProvider>{children}</ThirdwebProvider>
     </QueryClientProvider>
   );
