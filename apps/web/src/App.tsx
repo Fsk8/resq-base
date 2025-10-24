@@ -19,12 +19,13 @@ import { createWallet, inAppWallet } from "thirdweb/wallets";
 import type { Abi } from "viem";
 import { formatUnits } from "viem";
 import { RESQ_FACTORY_ABI, RESQ_CIRCLE_ABI, ERC20_ABI } from "./abi/resq";
+import { MyCircles } from "./components/MyCircles";
 
 /** ENV */
 const FACTORY = import.meta.env.VITE_FACTORY_ADDR as `0x${string}`;
 const CLIENT_ID = import.meta.env.VITE_THIRDWEB_CLIENT_ID as string | undefined;
 
-/** Helper para preparar llamadas */
+/** Helper TX */
 function pc(contract: any, method: string, params: any[] = []) {
   return prepareContractCall({
     contract,
@@ -33,7 +34,7 @@ function pc(contract: any, method: string, params: any[] = []) {
   });
 }
 
-/** Limpia sesión thirdweb (evita rehidrataciones viejas) */
+/** Reset rápido de sesión thirdweb */
 function clearThirdwebStorage() {
   try {
     Object.keys(localStorage)
@@ -59,8 +60,8 @@ export default function App() {
       <div style={{ padding: 20, fontFamily: "system-ui" }}>
         <h1>ResQ (Base)</h1>
         <p style={{ color: "#b71c1c" }}>
-          Falta <code>VITE_THIRDWEB_CLIENT_ID</code> en <code>.env</code>.
-          Agrégalo y reinicia <code>npm run dev</code>.
+          Falta <code>VITE_THIRDWEB_CLIENT_ID</code> en{" "}
+          <code>apps/web/.env</code>.
         </p>
       </div>
     );
@@ -68,7 +69,7 @@ export default function App() {
 
   const client = createThirdwebClient({ clientId: CLIENT_ID });
 
-  // Wallets disponibles en el modal
+  // Wallets para el modal
   const metamask = useMemo(() => createWallet("io.metamask"), []);
   const coinbase = useMemo(() => createWallet("com.coinbase.wallet"), []);
   const embedded = useMemo(
@@ -91,6 +92,29 @@ export default function App() {
     } catch {}
     clearThirdwebStorage();
     window.location.reload();
+  }
+
+  // Instancia del Factory (una sola vez)
+  const factory = useMemo(
+    () =>
+      getContract({
+        client,
+        chain: baseSepolia,
+        address: FACTORY,
+        abi: RESQ_FACTORY_ABI as Abi,
+      }),
+    []
+  );
+
+  // Estado compartido para autocompletar acciones
+  const [selectedCircle, setSelectedCircle] = useState<`0x${string}` | "">("");
+  const [selectedToken, setSelectedToken] = useState<`0x${string}` | "">("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  function handleSelectCircle(circle: `0x${string}`, token?: `0x${string}`) {
+    setSelectedCircle(circle);
+    if (token) setSelectedToken(token);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }
 
   return (
@@ -126,7 +150,7 @@ export default function App() {
             chain={baseSepolia}
             accountAbstraction={{
               chain: baseSepolia,
-              sponsorGas: true, // 👈 Paymaster thirdweb en testnet
+              sponsorGas: true, // Paymaster de thirdweb en testnet
             }}
             wallets={walletsBoth}
             connectModal={{ title: "Conectar a ResQ", size: "compact" }}
@@ -138,23 +162,43 @@ export default function App() {
       </header>
 
       <p style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-        Conectado: {active?.address ?? "—"} (con AA, esta suele ser tu Smart
-        Account)
+        Conectado: {active?.address ?? "—"} (con AA, suele ser tu Smart Account)
       </p>
 
       <hr />
-      <CreateCircle client={client} />
+
+      <CreateCircle
+        client={client}
+        factory={factory}
+        onCreated={() => setRefreshKey((k) => k + 1)}
+      />
+
+      <MyCircles
+        factory={factory}
+        onSelectCircle={handleSelectCircle}
+        refreshKey={refreshKey}
+      />
+
       <hr />
-      <CircleActions client={client} />
+
+      <CircleActions
+        client={client}
+        initialCircle={selectedCircle}
+        initialToken={selectedToken}
+      />
     </div>
   );
 }
 
-/* === Crear círculo (Factory) === */
+/* =================== Crear círculo =================== */
 function CreateCircle({
   client,
+  factory,
+  onCreated,
 }: {
   client: ReturnType<typeof createThirdwebClient>;
+  factory: ReturnType<typeof getContract>;
+  onCreated: () => void;
 }) {
   const { mutateAsync: sendTx, isPending, error } = useSendTransaction();
 
@@ -165,17 +209,6 @@ function CreateCircle({
   const [quorum, setQuorum] = useState(4000);
   const [approveBps, setApproveBps] = useState(6000);
   const [capBps, setCapBps] = useState(2000);
-
-  const factory = useMemo(
-    () =>
-      getContract({
-        client,
-        chain: baseSepolia,
-        address: FACTORY,
-        abi: RESQ_FACTORY_ABI as Abi,
-      }),
-    []
-  );
 
   useEffect(() => {
     if (error) {
@@ -199,6 +232,7 @@ function CreateCircle({
 
     const { transactionHash } = await sendTx(tx);
     alert(`✅ Círculo creado\nTX: ${transactionHash}`);
+    onCreated?.();
   }
 
   return (
@@ -269,22 +303,33 @@ function CreateCircle({
   );
 }
 
-/* === Acciones de un círculo === */
+/* =================== Acciones del círculo =================== */
 function CircleActions({
   client,
+  initialCircle,
+  initialToken,
 }: {
   client: ReturnType<typeof createThirdwebClient>;
+  initialCircle?: `0x${string}` | "";
+  initialToken?: `0x${string}` | "";
 }) {
   const { mutateAsync: sendTx, isPending, error } = useSendTransaction();
 
-  const [circleAddr, setCircleAddr] = useState("");
-  const [tokenAddr, setTokenAddr] = useState("");
+  const [circleAddr, setCircleAddr] = useState(initialCircle || "");
+  const [tokenAddr, setTokenAddr] = useState(initialToken || "");
   const [decimals, setDecimals] = useState(6);
 
   const [amountHuman, setAmountHuman] = useState("2");
   const [claimHuman, setClaimHuman] = useState("1");
   const [evidence, setEvidence] = useState("ipfs://demoCID");
   const [claimId, setClaimId] = useState(0);
+
+  useEffect(() => {
+    if (initialCircle) setCircleAddr(initialCircle);
+  }, [initialCircle]);
+  useEffect(() => {
+    if (initialToken) setTokenAddr(initialToken);
+  }, [initialToken]);
 
   const circle = useMemo(
     () =>
@@ -311,6 +356,30 @@ function CircleActions({
         : undefined,
     [tokenAddr]
   );
+
+  // 👇 añade esto dentro de CircleActions()
+  const active = useActiveAccount();
+
+  /** Mint de prueba al usuario conectado (Smart Account) */
+  async function devMint() {
+    if (!erc20 || !active?.address) {
+      alert("Completa el token ERC20 y conéctate primero.");
+      return;
+    }
+    try {
+      const amount = toUnits("1000", decimals); // 1000 tokens de prueba
+      // Si tu MockERC20 tiene signature mint(address,uint256):
+      const tx = pc(erc20, "mint", [active.address, amount]);
+      const { transactionHash } = await sendTx(tx);
+      alert(`✅ Mint ok (1000 tokens)\nTX: ${transactionHash}`);
+    } catch (e: any) {
+      console.error("mint error:", e);
+      alert(
+        "❌ No se pudo mintear.\n" +
+          "Revisa que tu MockERC20 tenga el método mint(address,uint256) y que cualquiera pueda llamarlo."
+      );
+    }
+  }
 
   useEffect(() => {
     if (error) {
@@ -364,14 +433,12 @@ function CircleActions({
           onChange={(e) => setCircleAddr(e.target.value)}
           placeholder="0xCIRCLE..."
         />
-
         <label>Token:</label>
         <input
           value={tokenAddr}
           onChange={(e) => setTokenAddr(e.target.value)}
           placeholder="0xTOKEN..."
         />
-
         <label>Decimals:</label>
         <input
           type="number"
@@ -383,6 +450,9 @@ function CircleActions({
       <div style={{ marginTop: 12 }}>
         <button disabled={isPending} onClick={approveAndJoin}>
           {isPending ? "Procesando..." : "Approve + Join"}
+        </button>
+        <button onClick={devMint} style={{ marginLeft: 8 }}>
+          Dev Mint 1000
         </button>
       </div>
 
@@ -417,7 +487,7 @@ function CircleActions({
   );
 }
 
-/* === Mostrar claim === */
+/* =================== Lecturas del claim =================== */
 function CircleReads({
   circle,
   claimId,
