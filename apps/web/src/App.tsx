@@ -20,12 +20,24 @@ import { createWallet, inAppWallet } from "thirdweb/wallets";
 import { baseSepolia as baseSepoliaTW } from "thirdweb/chains"; // (thirdweb)
 import { baseSepolia as baseSepoliaViem } from "viem/chains"; // (viem)
 
+import { upload } from "thirdweb/storage";
+
 // ✅ viem para lecturas (view calls)
 import { createPublicClient, http, formatUnits, type Abi } from "viem";
 
 import { RESQ_FACTORY_ABI, RESQ_CIRCLE_ABI, ERC20_ABI } from "./abi/resq";
 import { MyCircles } from "./components/MyCircles";
 import { Discover } from "./pages/Discover";
+
+// Convierte ipfs://... a un gateway HTTPS. Tolera null/undefined/""
+function makeGatewayUrl(ipfsUri?: string | null): string {
+  if (!ipfsUri) return ""; // nada que mostrar
+  if (!ipfsUri.startsWith("ipfs://")) return ipfsUri; // ya es https o algo más
+
+  // Quita el prefijo "ipfs://" solo una vez
+  const path = ipfsUri.slice("ipfs://".length); // más robusto que replace()
+  return `https://gateway.ipfscdn.io/ipfs/${path}`;
+}
 
 /** ENV */
 const FACTORY = import.meta.env.VITE_FACTORY_ADDR as `0x${string}`;
@@ -122,7 +134,7 @@ export default function App() {
         address: FACTORY,
         abi: RESQ_FACTORY_ABI as Abi,
       }),
-    []
+    [] // intencional para no re-instanciar
   );
 
   // Tabs
@@ -358,7 +370,7 @@ function CreateCircle({
   );
 }
 
-/* =================== Acciones del círculo (con Preflight visual) =================== */
+/* =================== Acciones del círculo (con Preflight + IPFS) =================== */
 type PreflightData = {
   token: `0x${string}`;
   decimals: number;
@@ -386,7 +398,14 @@ function CircleActions({
 
   const [amountHuman, setAmountHuman] = useState("2");
   const [claimHuman, setClaimHuman] = useState("1");
-  const [evidence, setEvidence] = useState("ipfs://demoCID");
+
+  // Evidencia: archivo + URI + preview
+  const [evidence, setEvidence] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadedUri, setUploadedUri] = useState<string | null>(null);
+
   const [claimId, setClaimId] = useState(0);
 
   // Preflight UI state
@@ -455,6 +474,34 @@ function CircleActions({
       }),
     []
   );
+
+  // ======= IPFS upload (thirdweb storage) =======
+  function onPickFile(f?: File | null) {
+    setFile(f ?? null);
+    setUploadedUri(null);
+    setEvidence("");
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(f ? URL.createObjectURL(f) : null);
+  }
+
+  async function uploadEvidenceToIPFS() {
+    if (!file) return alert("Selecciona un archivo primero.");
+    setUploading(true);
+    try {
+      // thirdweb v5 — upload utilitario
+      const uri = await upload({
+        client,
+        files: [file],
+      });
+      setUploadedUri(uri); // ipfs://CID/archivo.ext
+      setEvidence(uri); // listo para openClaim
+    } catch (e: any) {
+      console.error(e);
+      alert(`Falló la subida a IPFS: ${e?.message ?? e}`);
+    } finally {
+      setUploading(false);
+    }
+  }
 
   // ======= Preflight visual con viem =======
   async function preflightRead() {
@@ -634,8 +681,17 @@ function CircleActions({
     alert("✅ Aprobado + unido");
   }
 
+  // Validaciones para habilitar "Abrir Claim"
+  const isValidEvidence = evidence.startsWith("ipfs://");
+  const isPositiveClaim = Number(claimHuman) > 0;
+  const canOpenClaim =
+    !!circle && isValidEvidence && isPositiveClaim && !isPending;
+
   async function openClaim() {
     if (!circle) return alert("Círculo requerido");
+    if (!isValidEvidence) return alert("Sube evidencia a IPFS (ipfs://...).");
+    if (!isPositiveClaim) return alert("Monto a reclamar debe ser > 0.");
+
     const raw = toUnits(claimHuman, decimals);
     await sendTx(pc(circle, "openClaim", [evidence, raw]));
     alert("✅ Claim abierto");
@@ -644,7 +700,13 @@ function CircleActions({
   async function voteYes() {
     if (!circle) return;
     await sendTx(pc(circle, "vote", [BigInt(claimId), true]));
-    alert("✅ Voto registrado");
+    alert("✅ Voto SÍ registrado");
+  }
+
+  async function voteNo() {
+    if (!circle) return;
+    await sendTx(pc(circle, "vote", [BigInt(claimId), false]));
+    alert("✅ Voto NO registrado");
   }
 
   async function finalize() {
@@ -707,23 +769,108 @@ function CircleActions({
       {/* Panel visual de Preflight */}
       <PreflightPanel data={pf} error={pfError} onFixApprove={fixApprove} />
 
+      {/* ======= Evidencia (IPFS) ======= */}
+      <div
+        style={{
+          marginTop: 16,
+          padding: 12,
+          border: "1px solid #eee",
+          borderRadius: 8,
+          background: "#fafafa",
+        }}
+      >
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>Evidencia (IPFS)</div>
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <input
+            type="file"
+            onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+          />
+          <button onClick={uploadEvidenceToIPFS} disabled={!file || uploading}>
+            {uploading ? "Subiendo..." : "Subir a IPFS"}
+          </button>
+        </div>
+
+        {/* Preview local antes de subir */}
+        {previewUrl ? (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>
+              Vista previa (local, sin subir):
+            </div>
+            {file?.type.startsWith("image/") ? (
+              <img
+                src={previewUrl}
+                style={{
+                  maxWidth: 360,
+                  borderRadius: 6,
+                  border: "1px solid #eee",
+                }}
+              />
+            ) : file?.type === "application/pdf" ? (
+              <object
+                data={previewUrl}
+                type="application/pdf"
+                width="360"
+                height="240"
+                style={{ border: "1px solid #eee", borderRadius: 6 }}
+              >
+                <a href={previewUrl} target="_blank">
+                  Abrir PDF
+                </a>
+              </object>
+            ) : (
+              <div style={{ fontSize: 12 }}>
+                Archivo elegido: <b>{file?.name}</b> (
+                {file?.type || "tipo desconocido"})
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {/* Campo URI + link al gateway una vez subido */}
+        <div style={{ marginTop: 8 }}>
+          <label>URI:</label>{" "}
+          <input
+            style={{ width: 360 }}
+            value={evidence}
+            onChange={(e) => setEvidence(e.target.value)}
+            placeholder="ipfs://CID[/archivo]"
+          />
+          {uploadedUri ? (
+            <div style={{ marginTop: 6, fontSize: 12 }}>
+              🎉 Subido:&nbsp;
+              <a
+                href={makeGatewayUrl(uploadedUri)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {makeGatewayUrl(uploadedUri)}
+              </a>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
       <div style={{ marginTop: 12 }}>
-        <input
-          value={evidence}
-          onChange={(e) => setEvidence(e.target.value)}
-          placeholder="ipfs://CID"
-          style={{ width: 300, marginRight: 8 }}
-        />
         <input
           value={claimHuman}
           onChange={(e) => setClaimHuman(e.target.value)}
           placeholder="Monto a reclamar"
           style={{ width: 180, marginRight: 8 }}
         />
-        <button onClick={openClaim}>Abrir Claim</button>
+        <button onClick={openClaim} disabled={!canOpenClaim}>
+          {canOpenClaim ? "Abrir Claim" : "Abrir Claim (incompleto)"}
+        </button>
       </div>
 
       <div style={{ marginTop: 12 }}>
+        {/* Si luego quieres quitar este input, renderiza una lista de claims y pasa el claimId correcto a cada fila */}
         <input
           type="number"
           value={claimId}
@@ -731,6 +878,9 @@ function CircleActions({
           style={{ width: 120, marginRight: 8 }}
         />
         <button onClick={voteYes}>Votar SÍ</button>
+        <button onClick={voteNo} style={{ marginLeft: 8 }}>
+          Votar NO
+        </button>
         <button onClick={finalize} style={{ marginLeft: 8 }}>
           Finalizar
         </button>

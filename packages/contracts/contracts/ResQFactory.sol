@@ -3,11 +3,16 @@ pragma solidity ^0.8.24;
 
 import "./ResQCircle.sol";
 
+/**
+ * @title ResQFactory
+ * @notice Despliega nuevos círculos ResQ y emite eventos para indexar.
+ */
 contract ResQFactory {
     event CircleCreated(address indexed creator, address circle, address token, uint256 minContribution);
+
     address[] public allCircles;
 
-    // Función original (mantener para compatibilidad)
+    // Conserva tu función original
     function createCircle(
         address token,
         uint256 minContribution,
@@ -30,7 +35,7 @@ contract ResQFactory {
         emit CircleCreated(msg.sender, circle, token, minContribution);
     }
 
-    // NUEVA FUNCIÓN PÚBLICA para el Frontend
+    // Conveniencia para frontend
     function createCirclePublic(
         address token,
         uint256 minContribution,
@@ -39,7 +44,6 @@ contract ResQFactory {
         uint16 approveBps,
         uint16 maxPayoutPerClaimBps
     ) external returns (address circle) {
-        // Validaciones adicionales para seguridad
         require(token != address(0), "Token address cannot be zero");
         require(minContribution > 0, "Min contribution must be greater than 0");
         require(voteDuration > 0, "Vote duration must be greater than 0");
@@ -47,9 +51,8 @@ contract ResQFactory {
         require(approveBps <= 10000, "Approval threshold cannot exceed 100%");
         require(maxPayoutPerClaimBps <= 10000, "Max payout cannot exceed 100%");
 
-        // Crear el círculo - msg.sender será el admin del círculo
         ResQCircle c = new ResQCircle(
-            msg.sender,  // El que llama es el admin
+            msg.sender,  // admin del círculo
             token,
             minContribution,
             voteDuration,
@@ -57,11 +60,10 @@ contract ResQFactory {
             approveBps,
             maxPayoutPerClaimBps
         );
-        
+
         circle = address(c);
         allCircles.push(circle);
         emit CircleCreated(msg.sender, circle, token, minContribution);
-        
         return circle;
     }
 
